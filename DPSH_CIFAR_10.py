@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from torchvision import models
 import os
 import numpy as np
+import pdb
 import pickle
 from datetime import datetime
 
@@ -203,11 +204,11 @@ def DPSH_algo(bit, param, gpu_ind=0):
             loss =  - logloss + lamda * regterm
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.data[0]
+            epoch_loss += float(loss.data)
 
             # print('[Training Phase][Epoch: %3d/%3d][Iteration: %3d/%3d] Loss: %3.5f' % \
             #       (epoch + 1, epochs, iter + 1, np.ceil(num_train / batch_size),loss.data[0]))
-        print('[Train Phase][Epoch: %3d/%3d][Loss: %3.5f]' % (epoch+1, epochs, epoch_loss / len(train_loader)), end='')
+        print('[Train Phase][Epoch: %3d/%3d][Loss: %3.5f]' % (epoch+1, epochs, epoch_loss / len(train_loader)))
         optimizer = AdjustLearningRate(optimizer, epoch, learning_rate)
 
         l, l1, l2, t1 = Totloss(U, B, Sim, lamda, num_train)
@@ -216,7 +217,7 @@ def DPSH_algo(bit, param, gpu_ind=0):
         totl2_record.append(l2)
         t1_record.append(t1)
 
-        print('[Total Loss: %10.5f][total L1: %10.5f][total L2: %10.5f][norm theta: %3.5f]' % (l, l1, l2, t1), end='')
+        print('[Total Loss: %10.5f][total L1: %10.5f][total L2: %10.5f][norm theta: %3.5f]' % (l, l1, l2, t1))
 
         ### testing during epoch
         qB = GenerateCode(model, test_loader, num_test, bit, use_gpu)

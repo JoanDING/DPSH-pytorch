@@ -3,6 +3,7 @@ import os
 import numpy as np
 from PIL import Image
 from torch.utils.data.dataset import Dataset
+import pdb
 
 class DatasetProcessingCIFAR_10(Dataset):
     def __init__(self, data_path, img_filename, label_filename, transform=None):
@@ -11,7 +12,15 @@ class DatasetProcessingCIFAR_10(Dataset):
         # reading img file from file
         img_filepath = os.path.join(data_path, img_filename)
         fp = open(img_filepath, 'r')
-        self.img_filename = [x.strip() for x in fp]
+        self.img_filename = []
+        for x in fp:
+            file_tmp = x.strip().split('/')
+            file_id = int(file_tmp[-1][:-4])
+            file_id -= 1
+            self.img_filename.append(file_tmp[0] + '/' + str(file_id) + '.png')
+
+        #self.img_filename = [x.strip() for x in fp]
+
         fp.close()
         label_filepath = os.path.join(data_path, label_filename)
         fp_label = open(label_filepath, 'r')

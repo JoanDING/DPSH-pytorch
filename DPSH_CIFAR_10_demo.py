@@ -7,7 +7,7 @@ def DPSH_CIFAR_10_demo():
     param = {}
     param['lambda'] = lamda
 
-    gpu_ind = 7
+    gpu_ind = 1
     bits = [12, 24, 32, 48]
     for bit in bits:
         filename = 'log/DPSH_' + str(bit) + 'bits_CIFAR-10' + '_' + datetime.now().strftime("%y-%m-%d-%H-%M-%S") + '.pkl'
@@ -22,4 +22,5 @@ def DPSH_CIFAR_10_demo():
         fp.close()
 
 if __name__=="__main__":
+
     DPSH_CIFAR_10_demo()
