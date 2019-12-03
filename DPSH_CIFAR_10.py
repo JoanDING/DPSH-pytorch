@@ -9,6 +9,8 @@ import numpy as np
 import pdb
 import pickle
 from datetime import datetime
+import argparse
+import pdb
 
 import utils.DataProcessing as DP
 import utils.CalcHammingRanking as CalcHR
@@ -69,6 +71,7 @@ def Logtrick(x, use_gpu):
     else:
         lt = torch.log(1+torch.exp(-torch.abs(x))) + torch.max(x, Variable(torch.FloatTensor([0.])))
     return lt
+
 def Totloss(U, B, Sim, lamda, num_train):
     theta = U.mm(U.t()) / 2
     t1 = (theta*theta).sum() / (num_train * num_train)
@@ -77,11 +80,11 @@ def Totloss(U, B, Sim, lamda, num_train):
     l = l1 + lamda * l2
     return l, l1, l2, t1
 
-def DPSH_algo(bit, param, gpu_ind=0):
+def DPSH_algo(param, gpu_ind=0):
     # parameters setting
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_ind)
 
-    DATA_DIR = 'data/CIFAR-10'
+    DATA_DIR = 'data/{}'.format(param.dataset.upper())
     DATABASE_FILE = 'database_img.txt'
     TRAIN_FILE = 'train_img.txt'
     TEST_FILE = 'test_img.txt'
@@ -90,21 +93,18 @@ def DPSH_algo(bit, param, gpu_ind=0):
     TRAIN_LABEL = 'train_label.txt'
     TEST_LABEL = 'test_label.txt'
 
-    batch_size = 128
-    epochs = 150
-    learning_rate = 0.05
-    weight_decay = 10 ** -5
-    model_name = 'alexnet'
-    nclasses = 10
+    epochs = param.max_epoch
+    learning_rate = param.lr
+    weight_decay = param.weight_decay
+    model_name = param.model
+    nclasses = param.nclasses
     use_gpu = torch.cuda.is_available()
-
-    filename = param['filename']
-
-    lamda = param['lambda']
-    param['bit'] = bit
-    param['epochs'] = epochs
-    param['learning rate'] = learning_rate
-    param['model'] = model_name
+    filename = param.filename
+    lamda = param.lamda
+    bit = param.bit
+    #param['bit'] = bit
+    #param['learning rate'] = learning_rate
+    #param['model'] = model_name
 
     ### data processing
     transformations = transforms.Compose([
@@ -113,41 +113,39 @@ def DPSH_algo(bit, param, gpu_ind=0):
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
-    dset_database = DP.DatasetProcessingCIFAR_10(
-        DATA_DIR, DATABASE_FILE, DATABASE_LABEL, transformations)
+    if param.dataset == 'cifar-10':
+        dset_database = DP.DatasetProcessingCIFAR_10(
+            DATA_DIR, DATABASE_FILE, DATABASE_LABEL, transformations)
 
-    dset_train = DP.DatasetProcessingCIFAR_10(
-        DATA_DIR, TRAIN_FILE, TRAIN_LABEL, transformations)
+        dset_train = DP.DatasetProcessingCIFAR_10(
+            DATA_DIR, TRAIN_FILE, TRAIN_LABEL, transformations)
 
-    dset_test = DP.DatasetProcessingCIFAR_10(
-        DATA_DIR, TEST_FILE, TEST_LABEL, transformations)
+        dset_test = DP.DatasetProcessingCIFAR_10(
+            DATA_DIR, TEST_FILE, TEST_LABEL, transformations)
 
     num_database, num_train, num_test = len(dset_database), len(dset_train), len(dset_test)
 
     database_loader = DataLoader(dset_database,
-                              batch_size=batch_size,
+                              batch_size = param.batch_size,
                               shuffle=False,
                               num_workers=4
                              )
 
     train_loader = DataLoader(dset_train,
-                              batch_size=batch_size,
+                              batch_size = param.batch_size,
                               shuffle=True,
                               num_workers=4
                              )
 
     test_loader = DataLoader(dset_test,
-                             batch_size=batch_size,
+                             batch_size = param.batch_size,
                              shuffle=False,
                              num_workers=4
                              )
 
     ### create model
     model = CreateModel(model_name, bit, use_gpu)
-    optimizer = optim.SGD(
-        model.parameters(),
-        lr=learning_rate,
-        weight_decay=weight_decay)
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     ### training phase
     # parameters setting
@@ -157,6 +155,8 @@ def DPSH_algo(bit, param, gpu_ind=0):
     train_labels_onehot = EncodingOnehot(train_labels, nclasses)
     test_labels = LoadLabel(TEST_LABEL, DATA_DIR)
     test_labels_onehot = EncodingOnehot(test_labels, nclasses)
+    database_labels = LoadLabel(DATABASE_LABEL, DATA_DIR)
+    database_labels_onehot = EncodingOnehot(database_labels, nclasses)
 
     train_loss = []
     map_record = []
@@ -174,14 +174,12 @@ def DPSH_algo(bit, param, gpu_ind=0):
         for iter, traindata in enumerate(train_loader, 0):
             train_input, train_label, batch_ind = traindata
             train_label = torch.squeeze(train_label)
+            train_label_onehot = EncodingOnehot(train_label, nclasses)
             if use_gpu:
-                train_label_onehot = EncodingOnehot(train_label, nclasses)
                 train_input, train_label = Variable(train_input.cuda()), Variable(train_label.cuda())
-                S = CalcSim(train_label_onehot, train_labels_onehot)
             else:
-                train_label_onehot = EncodingOnehot(train_label, nclasses)
                 train_input, train_label = Variable(train_input), Variable(train_label)
-                S = CalcSim(train_label_onehot, train_labels_onehot)
+            S = CalcSim(train_label_onehot, train_labels_onehot)
 
             model.zero_grad()
             train_outputs = model(train_input)
@@ -217,22 +215,29 @@ def DPSH_algo(bit, param, gpu_ind=0):
         totl2_record.append(l2)
         t1_record.append(t1)
 
-        print('[Total Loss: %10.5f][total L1: %10.5f][total L2: %10.5f][norm theta: %3.5f]' % (l, l1, l2, t1))
+        #print('[Total Loss: %10.5f][total L1: %10.5f][total L2: %10.5f][norm theta: %3.5f]' % (l, l1, l2, t1))
 
         ### testing during epoch
-        qB = GenerateCode(model, test_loader, num_test, bit, use_gpu)
-        tB = torch.sign(B).numpy()
-        map_ = CalcHR.CalcMap(qB, tB, test_labels_onehot.numpy(), train_labels_onehot.numpy())
+        #qB = GenerateCode(model, test_loader, num_test, bit, use_gpu)
+        #tB = torch.sign(B).numpy()
+        #map_ = CalcHR.CalcMap(qB, tB, test_labels_onehot.numpy(), train_labels_onehot.numpy())
         train_loss.append(epoch_loss / len(train_loader))
-        map_record.append(map_)
+        #map_record.append(map_)
 
-        print('[Test Phase ][Epoch: %3d/%3d] MAP(retrieval train): %3.5f' % (epoch+1, epochs, map_))
-        print(len(train_loader))
+        if epoch % param.test_epoch == 0:
+            qB = GenerateCode(model, test_loader, num_test, bit, use_gpu)
+            dB = GenerateCode(model, database_loader, num_database, bit, use_gpu)
+            map_ = CalcHR.CalcMap(qB, dB, test_labels_onehot.numpy(), database_labels_onehot.numpy())
+            map_5k =  CalcHR.CalcTopMap(qB, dB, test_labels_onehot.numpy(), database_labels_onehot.numpy(),5000)
+            map_50k =  CalcHR.CalcTopMap(qB, dB, test_labels_onehot.numpy(), database_labels_onehot.numpy(),50000)
+
+            print('[Test Phase ][Epoch: %3d/%3d] MAP(5k): %3.5f' % (epoch+1, epochs, map_5k))
+            print('[Test Phase ][Epoch: %3d/%3d] MAP(50k): %3.5f' % (epoch+1, epochs, map_50k))
+            print('[Test Phase ][Epoch: %3d/%3d] MAP(overall): %3.5f' % (epoch+1, epochs, map_))
+        #print(len(train_loader))
     ### evaluation phase
     ## create binary code
     model.eval()
-    database_labels = LoadLabel(DATABASE_LABEL, DATA_DIR)
-    database_labels_onehot = EncodingOnehot(database_labels, nclasses)
     qB = GenerateCode(model, test_loader, num_test, bit, use_gpu)
     dB = GenerateCode(model, database_loader, num_database, bit, use_gpu)
 
@@ -255,14 +260,24 @@ def DPSH_algo(bit, param, gpu_ind=0):
     return result
 
 if __name__=='__main__':
-    bit = 12
-    lamda = 50
-    gpu_ind = 0
-    filename = 'log/DPSH_' + str(bit) + 'bits_NUS-WIDE_' + datetime.now().strftime("%y-%m-%d-%H-%M-%S") + '.pkl'
-    param = {}
-    param['lambda'] = lamda
-    param['filename'] = filename
-    result = DPSH_algo(bit, param, gpu_ind)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--gpu', default = 0, type = int, help = 'gpu no')
+    parser.add_argument('--lr', default = 0.05, type = float, help = 'learning rate')
+    parser.add_argument('--weight_decay', default = 10e-5, type = float, help = 'weight_decay')
+    parser.add_argument('--max_epoch', default = 200, type = int, help = 'max epoch num')
+    parser.add_argument('--test_epoch', default = 10, type = int, help = 'max epoch num')
+    parser.add_argument('--model', default = 'alexnet', type = str, help = 'model name')
+    parser.add_argument('--batch_size', default = 128, type = int, help = 'batch size')
+    parser.add_argument('--bit', default = 12, type = int, help = 'code length, can be [12, 24, 236, 48, 64, 128...]')
+    parser.add_argument('--dataset', default = 'cifar-10', type = str, help = 'dataset name, can be only cifar-10 now')
+    parser.add_argument('--lamda', default = 50, type = int, help = 'hyperparam lambda')
+    opt = parser.parse_args()
+    if opt.dataset == 'cifar-10':
+        opt.nclasses = 10
+
+    filename = 'log/DPSH_' + str(opt.bit) + 'bits_{}_'.format(opt.dataset) + datetime.now().strftime("%y-%m-%d-%H-%M-%S") + '.pkl'
+    opt.filename = filename
+    result = DPSH_algo(opt, opt.gpu)
     fp = open(result['filename'], 'wb')
     pickle.dump(result, fp)
     fp.close()
